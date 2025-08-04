@@ -1,338 +1,339 @@
-#include <Adafruit_GFX.h>
-#include <Adafruit_ST7789.h>
-
 #include <Arduino.h>
+#include <RTClib.h>  // Biblioteca comum para manipulação de data/hora
 
-#define BUTTON1_PIN 12
-#define BUTTON2_PIN 14
-#define BUTTON3_PIN 27
+struct Tempo {
+  uint8_t hora;
+  uint8_t minuto;
+  uint8_t segundo;
+    
+  Tempo() : hora(0), minuto(0), segundo(0) {
 
-#define DEBOUNCE_MS 400  // Tempo mínimo entre eventos por botão
+  }
+  
+  Tempo(uint8_t h, uint8_t m, uint8_t s) : hora(h), minuto(m), segundo(s) {
+  
+  }
 
-QueueHandle_t buttonQueue;
+  uint32_t  converterTempoUnitario() const{//retornando o tempo em segundos para fazer comparação
+    return hora * 3600 + minuto * 60 + segundo;
+  }
 
-// === Variaveis globais ===
-//ph
-float ph = 0.0;
-float ultimo_ph = -1.0;
-//ec
-float ec = 0.0;
-float ultimo_ec = -1.0;
-//temperatura ar
-float temperatura_ar = 0.0;
-float ultima_temperatura_ar = -999.0;
-//umidade ar
-float umidade_ar = 0.0;
-float ultima_umidade_ar = -1.0;
-//temperatura agua
-float temperatura_agua = 0.0;
-float ultima_temperatura_agua = -999.0;
-//nivel
-String nivel_tanque = "";
-//fluxo sn
-bool fluxo_solucao_nutritiva = false;
-//fluxo ap
-bool fluxo_agua_potavel = false;
 
-// === Pinos do display OLED ST7789 ===
-#define TFT_CS   15
-#define TFT_RST  2
-#define TFT_DC   4
 
-//display
-Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
-int telaAtual = 0;
-int ultimaTelaAtual = 0;
+  Tempo converterParaTempo(uint32_t segundos) {//retornando o tempo no formato struct 'Tempo'
+    Tempo t;
+    t.hora = segundos / 3600;
+    segundos %= 3600;
+    t.minuto = segundos / 60;
+    t.segundo = segundos % 60;
+    return t;
+  }
 
-enum ButtonID {
-  BUTTON1,
-  BUTTON2,
-  BUTTON3,
-  UNKNOWN
 };
 
-void imprimir_tela_inicial(){
-  imprimir_tela_inicial_esquerda();
-  tft.drawLine(180, 0, 180, 240, ST77XX_WHITE);
-  imprimir_tela_inicial_direita();
-}
+struct Intervalo {
+  String funcao;
+  Tempo hora_inicial;
+  Tempo hora_final;
+  long periodo;
+  
+};
 
+struct IntervalosAgendamento {
+  static const int QUANTIDADE_MAXIMA_DE_INTERVALOS = 30;
+  Intervalo intervalos_agendamento[QUANTIDADE_MAXIMA_DE_INTERVALOS];
+  int quantidade_intervalos_agendamento = 0;
 
-
-bool imprimir_float_OLED(float &variavel, float &ultimaVariavel, int x, int y, int tamanhoFonte, uint16_t cor){
-  if(variavel != ultimaVariavel){
-    int16_t x1, y1;
-    uint16_t largura_texto, altura_texto;
-    tft.setTextSize(tamanhoFonte);
-    tft.getTextBounds(String(ultimaVariavel, 2), x, y, &x1, &y1, &largura_texto, &altura_texto);
-    tft.fillRect(x1, y1, largura_texto, altura_texto, ST77XX_BLACK);
-    bool retorno = imprimir_msg_OLED(String(variavel,2),x,y,tamanhoFonte,cor);
-    ultimaVariavel = variavel;
-    return retorno;
-  } else {
-    imprimir_msg_OLED(String(variavel,2),x,y,tamanhoFonte,cor);
+  bool adicionar_intervalos_agendamento(String funcao, Tempo hora_inicial, Tempo hora_final, long periodo) {
+    if (quantidade_intervalos_agendamento >= QUANTIDADE_MAXIMA_DE_INTERVALOS) return false;
+    intervalos_agendamento[quantidade_intervalos_agendamento].funcao = funcao;
+    intervalos_agendamento[quantidade_intervalos_agendamento].hora_inicial = hora_inicial;
+    intervalos_agendamento[quantidade_intervalos_agendamento].hora_final = hora_final;
+    intervalos_agendamento[quantidade_intervalos_agendamento].periodo = periodo;
+    quantidade_intervalos_agendamento++;
+    return true;
   }
-  return false;
-}
 
+  int buscar_periodo_de_um_intervalo(String funcao){
+    return 123;
+    for(int i = 0; i < quantidade_intervalos_agendamento; i++){
+      if(intervalos_agendamento[quantidade_intervalos_agendamento].funcao == funcao) {
+        return intervalos_agendamento[quantidade_intervalos_agendamento].periodo;
+      }
+    }
+  }
 
-bool imprimir_msg_OLED(String msg, int x, int y, int tamanhoFonte, uint16_t cor) {
-  int largura = tft.width();
-  int altura = tft.height();
+};
 
-  tft.setTextSize(tamanhoFonte);
+IntervalosAgendamento intervalos;
 
-  int16_t x1, y1;  //coordenadas da caixa delimitadora
-  uint16_t larguraTexto, alturaTexto;  //largura e altura do texto
+RTC_DS1307 rtc;
 
-  //dimensões reais do texto
-  tft.getTextBounds(msg, x, y, &x1, &y1, &larguraTexto, &alturaTexto);
+struct Atividade {
+  String funcao;
+  DateTime data_hora_inicial;
+  bool executado;
+};
 
-  if ((x + larguraTexto > largura)) {
+struct Agenda {
+  static const int MAX_ATIVIDADES = 10; // máximo de atividades permitidas
+  Atividade atividades[MAX_ATIVIDADES];
+  int quantidade = 0;
+
+  bool adicionar(const String funcao, const DateTime data_hora_inicial, bool executado) {
+    if (quantidade >= MAX_ATIVIDADES) return false;
+    atividades[quantidade].funcao = funcao;
+    atividades[quantidade].data_hora_inicial = data_hora_inicial;
+    atividades[quantidade].executado = executado;
+    quantidade++;
+    return true;
+  }
+
+  Atividade buscarAtividadePeloNome(String funcao){
+    for(int i = 0; i < quantidade; i++){
+      if(atividades[i].funcao == funcao){
+        return atividades[i];
+      }
+    }
+  }
+
+  bool reagendar(const String funcao) {
+
+    for(int i = 0; i < quantidade; i++){
+      if(atividades[i].funcao == funcao){
+
+        if(atividades[i].funcao == "irrigar"){
+          atividades[i].funcao = "desligar_irrigacao";
+        }
+
+        if(atividades[i].funcao == "desligar_irrigacao"){
+          atividades[i].funcao = "irrigar";
+        }
+           // Serial.println("mundao doido" +funcao);
+            //Serial.println( atividades[i].data_hora_inicial.timestamp() );
+
+        long periodo =  intervalos.buscar_periodo_de_um_intervalo(atividades[i].funcao);
+
+        atividades[i].data_hora_inicial = rtc.now() + periodo;
+
+        return true;
+      }
+    }
     return false;
   }
 
-  tft.setCursor(x, y);
-  tft.setTextColor(cor);
-  tft.print(msg);
-
-  return true;  // Texto impresso com sucesso
-}
-
-void imprimir_tela_inicial_esquerda(){
-  int posicao_x = 5;
-  imprimir_msg_OLED("pH: ",posicao_x,5,2,ST77XX_WHITE);
-  imprimir_float_OLED(ph, ultimo_ph, posicao_x+40,5,2,ST77XX_GREEN);
-
-  imprimir_msg_OLED("EC: ",posicao_x,35,2,ST77XX_WHITE);
-  imprimir_float_OLED(ec, ultimo_ec, posicao_x+40,35,2,ST77XX_GREEN);
-
-  imprimir_msg_OLED("Tmp ar: ",posicao_x,65,2,ST77XX_WHITE);
-  
-  imprimir_msg_OLED("Umd ar: ",posicao_x,95,2,ST77XX_WHITE);
-  
-  imprimir_msg_OLED("Tmp agua:",posicao_x,125,2,ST77XX_WHITE);
-  
-  imprimir_msg_OLED("Tmp agua:",posicao_x,125,2,ST77XX_WHITE);
-  
-  imprimir_msg_OLED("Nivel: ",posicao_x,155,2,ST77XX_WHITE);
-  
-  imprimir_msg_OLED("Flux S.N.:",posicao_x,185,2,ST77XX_WHITE);
-  
-  imprimir_msg_OLED("Flux A.P.:",posicao_x,215,2,ST77XX_WHITE);
-}
-
-void imprimir_tela_inicial_direita(){
-  int posicao_x = 185;
-  imprimir_msg_OLED("neb.: ",posicao_x,5,2,ST77XX_WHITE);
-  imprimir_msg_OLED("dias: ",posicao_x,35,2,ST77XX_WHITE);
-  imprimir_msg_OLED("ativ.: ",posicao_x,65,2,ST77XX_WHITE);
-  imprimir_msg_OLED("exaust.: ",posicao_x,95,2,ST77XX_WHITE);
-}
-
-void imprimir_tela_2(){
-  int posicao_x = 135;
-  imprimir_msg_OLED("Tela 2",posicao_x,5,3,ST77XX_WHITE);
-}
-
-void imprimir_tela_3(){
-  int posicao_x = 135;
-  imprimir_msg_OLED("Tela 3",posicao_x,5,3,ST77XX_WHITE);
-}
-
-void imprimir_tela_4(){
-  int posicao_x = 135;
-  imprimir_msg_OLED("Tela 4",posicao_x,5,3,ST77XX_WHITE);
-}
-
-void imprimir_tela_5(){
-  int posicao_x = 135;
-  imprimir_msg_OLED("Tela 5",posicao_x,5,3,ST77XX_WHITE);
-}
-
-
-void (*telas[])() = { //vetor de ponteiros para funções de exibição de tela
-  imprimir_tela_inicial,
-  imprimir_tela_2,
-  imprimir_tela_3,
-  imprimir_tela_4,
-  imprimir_tela_5
+  void listar() const {
+    for (int i = 0; i < quantidade; i++) {
+      Serial.print("[" + String(i) + "] ");
+      Serial.print(atividades[i].data_hora_inicial.timestamp(DateTime::TIMESTAMP_FULL));
+      Serial.print(" - ");
+      Serial.println(atividades[i].funcao);
+    }
+  }
 };
 
-void exibir_tela_atual(){
-  telas[telaAtual]();
-}
+Agenda agenda;
 
-// ISR única para os três botões
-void IRAM_ATTR sharedISR() {
-  ButtonID id = UNKNOWN;
+String monitoramentos[10] = {"ph","ec","nivel","temperatura_ar","umidade_ar","temperatura_sn"};
 
-  if (digitalRead(BUTTON1_PIN) == LOW) {
-    id = BUTTON1;
-  } else if (digitalRead(BUTTON2_PIN) == LOW) {
-    id = BUTTON2;
-  } else if (digitalRead(BUTTON3_PIN) == LOW) {
-    id = BUTTON3;
+const int QUANTIDADE_DE_PRIORIDADES = 8;
+String prioridades_de_ajustes[QUANTIDADE_DE_PRIORIDADES] = {
+  "aumentar_nivel_tanque",
+  "diminuir_temperatura_SN",
+  "aumentar_umidade_ar",
+  "diminuir_temperatura_ar",
+  "aumentar_pH",
+  "diminuir_pH",
+  "aumentar_EC",
+  "diminuir_EC"
+};
+
+struct Ajustes {
+  static const int QUANTIDADE_MAX_DE_AJUSTES = 10;
+  String atividades[QUANTIDADE_MAX_DE_AJUSTES];
+  int quantidade_atividades_ajuste = 0;
+
+  bool adicionar_atividade_de_ajuste(String ajuste) {
+    if (quantidade_atividades_ajuste >= QUANTIDADE_MAX_DE_AJUSTES) return false;
+    atividades[quantidade_atividades_ajuste] = ajuste;
+    quantidade_atividades_ajuste++;
+    return true;
   }
 
-  if (id != UNKNOWN) {
-    xQueueSendFromISR(buttonQueue, &id, NULL);
-  }
-}
-
-// Loop do núcleo 0 com tratamento e debounce
-void buttonLoopTask(void *parameter) {
-  ButtonID received;
-  unsigned long lastPressed[3] = {0, 0, 0};
-
-  while (true) {
-    if (xQueueReceive(buttonQueue, &received, pdMS_TO_TICKS(10))) {
-      unsigned long now = millis();
-      bool process = false;
-      int quantidadeTotalTelas = sizeof(telas) / sizeof(telas[0]);
-      switch (received) {
-        case BUTTON1:
-          if (now - lastPressed[0] >= DEBOUNCE_MS) {
-            lastPressed[0] = now;
-            process = true;
-            Serial.println("[Núcleo 0] Botão 1 pressionado");
-            telaAtual = (telaAtual - 1 + quantidadeTotalTelas) % quantidadeTotalTelas;
-            ultimaTelaAtual = telaAtual;
-            tft.fillScreen(ST77XX_BLACK);
-          }
-          break;
-        case BUTTON2:
-          if (now - lastPressed[1] >= DEBOUNCE_MS) {
-            lastPressed[1] = now;
-            process = true;
-            Serial.println("[Núcleo 0] Botão 2 pressionado");
-          }
-          break;
-        case BUTTON3:
-          if (now - lastPressed[2] >= DEBOUNCE_MS) {
-            lastPressed[2] = now;
-            process = true;
-            Serial.println("[Núcleo 0] Botão 3 pressionado");
-            telaAtual = (telaAtual + 1 + quantidadeTotalTelas) % quantidadeTotalTelas;
-            ultimaTelaAtual = telaAtual;
-            tft.fillScreen(ST77XX_BLACK);
-          }
-          break;
-        default:
-          break;
+  void ordenar_por_prioridade() {
+    auto prioridade = [](String ajuste) -> int {
+      for (int i = 0; i < QUANTIDADE_DE_PRIORIDADES; i++) {
+        if (prioridades_de_ajustes[i] == ajuste) return i;
       }
+      return QUANTIDADE_DE_PRIORIDADES; // Ajuste não encontrado → menor prioridade
+    };
 
-      // Se necessário, coloque ações adicionais aqui, dentro de `if (process)`
+    for (int i = 0; i < quantidade_atividades_ajuste - 1; i++) {
+      for (int j = i + 1; j < quantidade_atividades_ajuste; j++) {
+        if (prioridade(atividades[j]) < prioridade(atividades[i])) {
+          String temp = atividades[i];
+          atividades[i] = atividades[j];
+          atividades[j] = temp;
+        }
+      }
     }
-
-    exibir_tela_atual();
-
-    vTaskDelay(pdMS_TO_TICKS(10));  // Tempo de espera no "loop"
   }
-}
+};
+
+Ajustes ajustes;
+
+struct RegraDeDecisao{
+  String funcao;
+  int tempo_minimo_para_ajuste;
+};
+
+struct RegrasDeDecisoes{
+  RegraDeDecisao regras[10];
+
+  int buscar_tempo_minimo_para_ajuste(String funcao){
+    int quantidade_de_regras_de_decisao = sizeof(regras) / sizeof(regras[0]);
+    for(int i = 0; i < quantidade_de_regras_de_decisao; i++){
+      if(funcao == regras[i].funcao){
+        return regras[i].tempo_minimo_para_ajuste;
+      }
+    }
+  }
+
+};
+
+RegrasDeDecisoes regrasDeDecisoes;
 
 
 void setup() {
-  //==============TECNOLOGIA==============
   Serial.begin(115200);
-  
-  //ST7789
-  tft.init(240, 320);
-  tft.setRotation(3);
-  tft.fillScreen(ST77XX_BLACK);
 
-  // Configuração dos pinos com pull-up
-  pinMode(BUTTON1_PIN, INPUT_PULLUP);
-  pinMode(BUTTON2_PIN, INPUT_PULLUP);
-  pinMode(BUTTON3_PIN, INPUT_PULLUP);
+  if (!rtc.begin()) {
+    Serial.println("RTC DS1307 não encontrado!");
+    while (1);
+  }
 
-  // Cria fila de eventos dos botões
-  buttonQueue = xQueueCreate(10, sizeof(ButtonID));
+// apenas para testar depois vamos remover
+  agenda.adicionar("monitorar_ambiente",  DateTime(2025, 7, 30, 15, 30, 0), false);
+  agenda.adicionar("calibrar",  DateTime(2025, 8, 1, 6, 45, 0), false);
+  agenda.adicionar("irrigar", DateTime(2025, 7, 30, 15, 36, 0), false);
 
-  // Cria tarefa fixa no núcleo 0
-  xTaskCreatePinnedToCore(
-    buttonLoopTask,
-    "ButtonLoopTask",
-    2048,
-    NULL,
-    1,
-    NULL,
-    0
-  );
+//  monitoramentos = {"ph","ec","nivel","temperatura_ar","umidade_ar","temperatura_sn"};
 
-  // Registra ISR única
-  attachInterrupt(BUTTON1_PIN, sharedISR, FALLING);
-  attachInterrupt(BUTTON2_PIN, sharedISR, FALLING);
-  attachInterrupt(BUTTON3_PIN, sharedISR, FALLING);
+  ajustes.adicionar_atividade_de_ajuste("aumentar_EC");
+  ajustes.adicionar_atividade_de_ajuste("diminuir_pH");
+  ajustes.adicionar_atividade_de_ajuste("aumentar_nivel_tanque");
 
- /* 
-  //bool ha_login_na_flash = verificar_se_ha_login_e_senha_wifi_flash();
-  
-  if(ha_login_na_flash)}{
-    bool ha_pc_flash = verificar_se_ha_plano_de_cultivo_na_flash();
-    if(ha_pc_flash){
-      buscar_parametros_crescimento_da_fase(); //parametros são - cabeçalho, constantes da controladora, prioridades, regras de decisões, parametros ambientas e intervalos de agendamento da fase
-      criar_agenda();
+  intervalos.adicionar_intervalos_agendamento("tempo_solucao_nutritiva_parada", Tempo(0,0,0), Tempo(6,0,0), (long) 5);
+  intervalos.adicionar_intervalos_agendamento("tempo_solucao_nutritiva_parada", Tempo(6,0,1), Tempo(9,0,0), (long) 15);
+  intervalos.adicionar_intervalos_agendamento("tempo_solucao_nutritiva_parada", Tempo(9,0,1), Tempo(18,0,0), (long) 20);
+  intervalos.adicionar_intervalos_agendamento("tempo_solucao_nutritiva_parada", Tempo(18,0,1), Tempo(23,59,59), (long) 15);  
+  intervalos.adicionar_intervalos_agendamento("monitorar_EC", Tempo(0,0,0), Tempo(23,59,59), (long) 10);
+  intervalos.adicionar_intervalos_agendamento("monitorar_pH", Tempo(0,0,0), Tempo(23,59,59), (long) 20);
+
+  //Serial.println(intervalos.intervalos_agendamento[1].funcao);
+  //Serial.println(intervalos.intervalos_agendamento[1].periodo);
+  //Serial.println(intervalos.intervalos_agendamento[1].hora_final.hora);
+
+}
+
+//MONITOR DE AGENDAMENTOS
+void loop() {
+
+ 
+ //Itera em cada atividade da agenda e manda executar quando estiver na hora.
 
 
+  for (int i = 0; i < agenda.quantidade; i++) {
+    DateTime agora = rtc.now();
+    Atividade a = agenda.atividades[i];
+    if (a.data_hora_inicial <= agora ) {
+      Serial.println(a.funcao);
+      agenda.reagendar(a.funcao);
+      executor(a.funcao, (long)60);
     }
   }
-*/
-  
-}
-
-void loop() {
-  /*
-  Agenda copia_agenda[] = fazer_copia_da_agenda();
-  para cada atividade da cópia da agenda:
-    bool esta_na_hora_executar = verrificar_se_esta_na_hora_de_executar
-    if(esta_na_hora_executar):
-      oled.set_atividade(atividade.nome);
-      apagar_a_atividade_na_agenda(atividade.nome);
-      executor.executar(atividade.nome);
-  */
-}
-
-
-/*
-salvar_calibracao_sd_card(){
 
 }
-oled.set_atividade(String atividade.nome){
-  ...
-  oled.atualizar_atividade();
-}
 
-executor.executar(){
-  acessa um switch-case:
-    escolhe o caso de uso
-    executa o caso de uso
-}
 
-caso_de_uso(){
-  medir();
-  buscar_regras_de_decisoes();
-  tomar_decisão_de_acordo_com_regras_de_decisoes();
-  se necessário:
-    agendar_ajuste(ajustar_o_caso_de_uso);
-  registrar_o_log(chave, valor, observacao);
-  agendar(monitoramento_do_caso);
+void monitorar_ambiente(){
+  int quantidade_de_tarefas_monitoramento = sizeof(monitoramentos) / sizeof(monitoramentos[0]);
+  for(int i = 0; i < quantidade_de_tarefas_monitoramento; i++){
+    executor(monitoramentos[i], long(120));
+  }
+  orquestrador();
   return;
 }
 
-agendar(atividade.nome){
-  insire a atividade.nome na agenda observando os intervalos de agendamento
+void executor(String funcao, long tempo_para_executar){
+  
+  setAtividade(funcao);
+  executar(funcao, tempo_para_executar);
 }
 
-agendar_ajuste(ajuste.nome){
-  insere ajuste.nome na tabela de ajustes
+void executar(String funcao, long tempo_para_executar){
+  if (funcao == "monitorar_ph") {
+    monitorar_ph();
+  } else if (funcao == "monitorar_ec" ) {
+    monitorar_ec();
+  } else if (funcao == "monitorar_ambiente") {
+    monitorar_ambiente();
+  } else if (funcao == "irrigar") {
+    irrigar();
+  }else {
+    Serial.println("Sem função em execução no momento.");
+  }
 }
 
-orquestrar_ajustes(){
-  buscar_prioridades();
-  buscar_tabela_de_ajustes();
-  organizar_tabela_De_acordo_com_as_prioridades();
-  executar_os_ajustes_pela_sequencia_da_tabela();
+void setAtividade(String msg ){
+  Serial.print("OLED: monitorando: ");
+  Serial.print(msg);
 }
 
-*/
+void monitorar_ph(){
+  Serial.println("monitorando ph...");
+  return;
+}
+
+void monitorar_ec(){
+  Serial.println("monitorando ec...");
+  return;
+}
+
+void irrigar(){
+  Serial.println("irrigar");
+}
+
+void orquestrador(){
+  
+  //buscar a tabela de ajustes
+  //busca as prioridades de ajustes no plano de cultivo
+  //ordena as atividades de ajustes de acordo com as priodades
+  //para cada atividade da tabela de ajustes:
+  //buscar_prioridades();  
+  //organizar_agenda_de_acordo_com_as_prioridades();
+  for(int i = 0; i < ajustes.quantidade_atividades_ajuste ; i++){
+    Serial.println(ajustes.atividades[i]);
+  }
+  ajustes.ordenar_por_prioridade();
+  for(int i = 0; i < ajustes.quantidade_atividades_ajuste ; i++){
+    Serial.println(ajustes.atividades[i]);
+  }
+  delay(3000);
+  //buscar_agenda_de_ajustes
+  //executar_os_ajustes_pela_sequencia_da_tabela
+  DateTime hora_irrigacao = agenda.buscarAtividadePeloNome("irrigar").data_hora_inicial;
+  for(int i = 0; i < ajustes.quantidade_atividades_ajuste ; i++){
+    //buscar tempo disponivel
+    const long tempo_disponivel = hora_irrigacao.unixtime() - rtc.now().unixtime();
+    //buscar o tempo minimo para realizar a atividade
+    const int menor_tempo_para_ajuste = regrasDeDecisoes.buscar_tempo_minimo_para_ajuste(ajustes.atividades[i]);//em segundos
+    if(tempo_disponivel >= menor_tempo_para_ajuste){
+      executor(ajustes.atividades[i], tempo_disponivel);
+    }
+  }  
+}
+
+void verificar_se_ha_tempo_para_ajuste(){
+  
+}
