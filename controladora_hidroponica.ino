@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include <RTClib.h>  // Biblioteca comum para manipulação de data/hora
+#include <RTClib.h>
 
 struct Tempo {
   uint8_t hora;
@@ -55,7 +55,7 @@ struct IntervalosAgendamento {
   }
 
   int buscar_periodo_de_um_intervalo(String funcao){
-    return 123;
+    return 12;
     for(int i = 0; i < quantidade_intervalos_agendamento; i++){
       if(intervalos_agendamento[quantidade_intervalos_agendamento].funcao == funcao) {
         return intervalos_agendamento[quantidade_intervalos_agendamento].periodo;
@@ -104,9 +104,7 @@ struct Agenda {
 
         if(atividades[i].funcao == "irrigar"){
           atividades[i].funcao = "desligar_irrigacao";
-        }
-
-        if(atividades[i].funcao == "desligar_irrigacao"){
+        } else if(atividades[i].funcao == "desligar_irrigacao"){
           atividades[i].funcao = "irrigar";
         }
            // Serial.println("mundao doido" +funcao);
@@ -134,7 +132,7 @@ struct Agenda {
 
 Agenda agenda;
 
-String monitoramentos[10] = {"ph","ec","nivel","temperatura_ar","umidade_ar","temperatura_sn"};
+String monitoramentos[6] = {"ph","ec","nivel","temperatura_ar","umidade_ar","temperatura_sn"};
 
 const int QUANTIDADE_DE_PRIORIDADES = 8;
 String prioridades_de_ajustes[QUANTIDADE_DE_PRIORIDADES] = {
@@ -191,18 +189,20 @@ struct RegrasDeDecisoes{
   RegraDeDecisao regras[10];
 
   int buscar_tempo_minimo_para_ajuste(String funcao){
+    int tempo_minimo_ajuste = 0;
     int quantidade_de_regras_de_decisao = sizeof(regras) / sizeof(regras[0]);
     for(int i = 0; i < quantidade_de_regras_de_decisao; i++){
       if(funcao == regras[i].funcao){
-        return regras[i].tempo_minimo_para_ajuste;
+        tempo_minimo_ajuste = regras[i].tempo_minimo_para_ajuste;
       }
     }
+    return tempo_minimo_ajuste;
   }
 
 };
 
 RegrasDeDecisoes regrasDeDecisoes;
-
+#define SD_CS_PIN 5 
 
 void setup() {
   Serial.begin(115200);
@@ -280,14 +280,15 @@ void executar(String funcao, long tempo_para_executar){
     monitorar_ambiente();
   } else if (funcao == "irrigar") {
     irrigar();
+  } else if (funcao == "desligar_irrigacao") {
+    desligar_irrigacao();
   }else {
     Serial.println("Sem função em execução no momento.");
   }
 }
 
 void setAtividade(String msg ){
-  Serial.print("OLED: monitorando: ");
-  Serial.print(msg);
+  Serial.println("OLED: setando atividade: "+msg);
 }
 
 void monitorar_ph(){
@@ -301,7 +302,11 @@ void monitorar_ec(){
 }
 
 void irrigar(){
-  Serial.println("irrigar");
+  Serial.println("executando irrigar");
+}
+
+void desligar_irrigacao(){
+  Serial.println("executando desligar irrigacao");
 }
 
 void orquestrador(){
@@ -322,18 +327,25 @@ void orquestrador(){
   delay(3000);
   //buscar_agenda_de_ajustes
   //executar_os_ajustes_pela_sequencia_da_tabela
-  DateTime hora_irrigacao = agenda.buscarAtividadePeloNome("irrigar").data_hora_inicial;
+
+  Serial.println("executando os ajustes pela sequencia da tabela");
+  DateTime hora_irrigacao = agenda.buscarAtividadePeloNome(agenda.atividades[2].funcao).data_hora_inicial;
   for(int i = 0; i < ajustes.quantidade_atividades_ajuste ; i++){
     //buscar tempo disponivel
     const long tempo_disponivel = hora_irrigacao.unixtime() - rtc.now().unixtime();
     //buscar o tempo minimo para realizar a atividade
     const int menor_tempo_para_ajuste = regrasDeDecisoes.buscar_tempo_minimo_para_ajuste(ajustes.atividades[i]);//em segundos
     if(tempo_disponivel >= menor_tempo_para_ajuste){
+      Serial.println("Ha tempo suficiente para executar o ajuste");
       executor(ajustes.atividades[i], tempo_disponivel);
+    } else {
+      Serial.println("Não ha tempo suficiente para executar o ajuste");
     }
-  }  
+  } 
 }
 
 void verificar_se_ha_tempo_para_ajuste(){
   
 }
+
+//MODULO LEITURA DE ARQUIVOS SD E SPIFFS
